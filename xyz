@@ -1,0 +1,103 @@
+flowchart TD
+    Start([Ticket Created]) --> ITSM[ITSM System]
+    ITSM --> Webhook[Webhook Triggered]
+    Webhook --> StoreWebhook[(Store Webhook Data<br/>PostgreSQL)]
+    
+    StoreWebhook --> TriggerPipeline[Trigger Pipeline]
+    TriggerPipeline --> ExtractData[Extract Ticket Data<br/>- IP Address<br/>- Vendor Details<br/>- Location Name<br/>- Issue Type]
+    
+    ExtractData --> StoreTicket[(Store Ticket Details<br/>PostgreSQL)]
+    StoreTicket --> DetermineSchedule{Issue Type?}
+    
+    DetermineSchedule -->|Link Down| Schedule1[Schedule: 2.5 min interval]
+    DetermineSchedule -->|Link Degraded| Schedule2[Schedule: 5 min interval]
+    
+    Schedule1 --> LoopStart[Execution Loop<br/>4 iterations]
+    Schedule2 --> LoopStart
+    
+    LoopStart --> LogExecution[(Log Execution Start<br/>PostgreSQL)]
+    
+    %% Parallel Data Collection
+    LogExecution --> ParallelStart{Start Data Collection}
+    
+    ParallelStart --> APIFlow[API Data Collection]
+    ParallelStart --> ManualTest[Manual Ping Tests]
+    ParallelStart --> PlaywrightFlow[Playwright Screenshot]
+    
+    %% API Flow
+    APIFlow --> FetchAPI[Fetch from API<br/>Based on Location]
+    FetchAPI --> GetVendor[Get Vendor Name]
+    GetVendor --> GetLinkID[Get Link ID]
+    GetLinkID --> GetISPIP[Get ISP IP]
+    GetISPIP --> FetchMetrics[Fetch Metrics using Timestamp<br/>- Jitter<br/>- Bandwidth<br/>- Packet Loss<br/>- Utilization]
+    FetchMetrics --> APIComplete[API Data Collected]
+    
+    %% Manual Ping Test Flow
+    ManualTest --> GetFirewallCreds[Get Firewall Credentials<br/>- Firewall IP<br/>- Username<br/>- Password]
+    GetFirewallCreds --> EstablishConn[Establish Connection<br/>Netmiko/Paramiko]
+    EstablishConn --> PingTest1[Test 1: Firewall → ISP<br/>Execute Ping Command]
+    PingTest1 --> PingTest2[Test 2: ISP → Google DNS<br/>Execute Ping Command]
+    PingTest2 --> CollectPingData[Collect Ping Results<br/>- Packet Loss<br/>- Jitter]
+    CollectPingData --> ManualComplete[Manual Test Complete]
+    
+    %% Playwright Flow
+    PlaywrightFlow --> LaunchBrowser[Launch Playwright Browser]
+    LaunchBrowser --> LoginNMS[Login to Linkeye NMS]
+    LoginNMS --> SearchVendor[Search by Vendor Name]
+    SearchVendor --> CaptureScreenshot[Capture Screenshot<br/>- Utilization<br/>- Packet Loss<br/>- Jitter<br/>- Latency]
+    CaptureScreenshot --> PlaywrightComplete[Screenshot Collected]
+    
+    %% Convergence Point
+    APIComplete --> DataReady{All Data<br/>Collected?}
+    ManualComplete --> DataReady
+    PlaywrightComplete --> DataReady
+    
+    DataReady --> CorrelateData[Correlate Data Sources<br/>- API Metrics<br/>- Manual Ping Tests<br/>- NMS Screenshots]
+    
+    CorrelateData --> AnalyzeMetrics[Analyze Key Metrics<br/>Focus on:<br/>- Packet Loss<br/>- Jitter]
+    
+    AnalyzeMetrics --> ApplyThresholds[Apply Health Thresholds]
+    
+    ApplyThresholds --> HealthCheck{Link Status?}
+    
+    HealthCheck -->|Healthy| ResultHealthy[Result: Healthy]
+    HealthCheck -->|Unhealthy| ResultUnhealthy[Result: Unhealthy]
+    
+    ResultHealthy --> StoreResult1[(Store Execution Result<br/>PostgreSQL)]
+    ResultUnhealthy --> StoreResult2[(Store Execution Result<br/>PostgreSQL)]
+    
+    StoreResult1 --> LogAction1[(Log Actions Taken<br/>PostgreSQL)]
+    StoreResult2 --> LogAction2[(Log Actions Taken<br/>PostgreSQL)]
+    
+    LogAction1 --> CheckIteration{Iteration Count?}
+    LogAction2 --> CheckIteration
+    
+    CheckIteration -->|< 4 iterations| WaitInterval[Wait for Interval<br/>2.5 min or 5 min]
+    WaitInterval --> LoopStart
+    
+    CheckIteration -->|4 iterations complete| FinalDecision{Final Status<br/>Analysis}
+    
+    FinalDecision -->|Consistently Healthy| CloseTicket[Close Ticket in ITSM]
+    FinalDecision -->|Unhealthy Detected| RaiseTicket[Raise/Escalate Ticket]
+    
+    CloseTicket --> LogAck1[(Log Acknowledgement Time<br/>PostgreSQL)]
+    RaiseTicket --> LogAck2[(Log Acknowledgement Time<br/>PostgreSQL)]
+    
+    LogAck1 --> End([Process Complete])
+    LogAck2 --> End
+    
+    style Start fill:#90EE90
+    style End fill:#FFB6C1
+    style HealthCheck fill:#FFE4B5
+    style FinalDecision fill:#FFE4B5
+    style DetermineSchedule fill:#E6E6FA
+    style DataReady fill:#E6E6FA
+    style StoreWebhook fill:#87CEEB
+    style StoreTicket fill:#87CEEB
+    style LogExecution fill:#87CEEB
+    style StoreResult1 fill:#87CEEB
+    style StoreResult2 fill:#87CEEB
+    style LogAction1 fill:#87CEEB
+    style LogAction2 fill:#87CEEB
+    style LogAck1 fill:#87CEEB
+    style LogAck2 fill:#87CEEB
